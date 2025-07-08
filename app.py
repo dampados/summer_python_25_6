@@ -1,13 +1,12 @@
 
 import sys
 import pandas
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QTableWidget,
-                             QTableWidgetItem, QPushButton,
-                             QLineEdit, QVBoxLayout, QWidget, QMenu, QLabel,
-                             QHBoxLayout, QTableView)
-from PyQt6.QtCore import (Qt, QTimer, pyqtSignal, QThread, QObject, 
-                          QRunnable, QThreadPool, QAbstractTableModel, pyqtProperty)
-from PyQt6.QtGui import QAction, QMovie  # переход к pyqt6
+from PyQt6.QtWidgets import (QApplication, QMainWindow,
+                             QPushButton, QVBoxLayout, QWidget, 
+                             QLabel, QComboBox)
+from PyQt6.QtCore import (Qt, pyqtSignal, QObject, 
+                          QRunnable, QThreadPool, pyqtProperty)
+from PyQt6.QtGui import QMovie  # переход к pyqt6
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -164,20 +163,31 @@ class View_graphs(QWidget):
         self.figure = Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
 
+        self.combo_type_chooser = QComboBox()
+        self.combo_type_chooser.addItem("Линейный график")
+        self.combo_type_chooser.addItem("Гистограмма")
+        self.combo_type_chooser.addItem("Круговая диаграмма")
+        self.combo_type_chooser.setEnabled(False)
+
+        # vvv техничка vvv
+        # добавляторы, порядок важен
         self.layout_root.addWidget(self.button_load_data)
         self.layout_root.addWidget(self.label_statistics)
+        self.layout_root.addWidget(self.combo_type_chooser)
         self.layout_root.addWidget(self.canvas)
 
+        # прибиваем спиннер к уже собранному метавиджету СЕЛФ
         self.graph_spinner = LoadingOverlay(self) # сложность...
         self.graph_spinner.hide()
 
     def bind_signals(self):
-        self.button_load_data.clicked.connect(lambda: self.view_model.task_load_data_from_csv()) # НИКАКИХ ДАННЫХ ИЗ VIEW
+        self.button_load_data.clicked.connect(lambda: self.view_model.task_load_data_from_csv()) # НИКАКИХ ДАННЫХ СУРСИМ ИЗ VIEW
+        self.combo_type_chooser.currentTextChanged.connect(self.redraw_canvas) # ОБНОВЛЯЕМ ИЗ self.data!!!!
         
     # vvvvvvvvvvvvvv РЕАКЦИИ НА СИГНАЛЫ ИЗ АБСТРАКЦИИ vvvvvvvvvvvvvv
         self.view_model.sgnl_loading_state_changed.connect(self.reaction_update_lock_n_spinner)
-        self.view_model.sgnl_data_changed.connect(self.reaction_update_canvas)
         self.view_model.sgnl_stats_changed.connect(self.reaction_update_statistics_label)
+        self.view_model.sgnl_data_changed.connect(self.reaction_update_canvas)
 
     def reaction_update_statistics_label(self, payload):
         text = f"Строк: {payload.row_count}\n" # просто перенос каретки, проще, хороший совет
@@ -188,29 +198,72 @@ class View_graphs(QWidget):
         self.label_statistics.setText(text)
 
     def reaction_update_canvas(self, payload): # по факту реакция на сигнал, в payload разгрузит дату
-        self.data = payload
 
+        option = self.combo_type_chooser.currentText()
+        self.data = payload # референс, не страшно. объявляется только тут, стоит проверку докинуть? #TODO проверка на несуществующий self.data
+
+        print(self.data) # ска ведь пейлоад нормальный, чего тебе надо
+        try:
+            self.redraw_canvas(option)
+        except Exception as e:
+            print(e)
+
+    # ^^^^^^^^^^^^^^ РЕАКЦИИ НА СИГНАЛЫ ИЗ АБСТРАКЦИИ ^^^^^^^^^^^^^^
+   
+    def redraw_canvas(self, option):
         self.canvas.figure.clear() # всегда чистим переде действием
 
-        ax = self.canvas.figure.add_subplot(111)
-        self.data['Date'] = pandas.to_datetime(self.data['Date'])
-        ax.plot(self.data['Date'], self.data['Value1'])
+        if option == "Линейный график":
+            self.draw_linear(self.data)
+        elif option == "Гистограмма":
+            self.draw_hist(self.data)
+        elif option == "Круговая диаграмма":
+            self.draw_circle(self.data)
+        else:
+            print(option)
 
-        # Set title and labels
+    def draw_linear(self, payload):
+        print("Drawing plot")
+        ax = self.canvas.figure.add_subplot(111)
+
+        payload['Date'] = pandas.to_datetime(payload['Date'])
+        ax.plot(payload['Date'], payload['Value1'])
+
         ax.set_title('Линейный график')
         ax.set_xlabel('Date')
         ax.set_ylabel('Value1')
 
-        # Update the graph canvas
         self.canvas.draw()
 
-    # ^^^^^^^^^^^^^^ РЕАКЦИИ НА СИГНАЛЫ ИЗ АБСТРАКЦИИ ^^^^^^^^^^^^^^
-      
+    def draw_hist(self, payload):
+        print("Drawing plot")
+        ax = self.canvas.figure.add_subplot(111)
+
+        payload['Date'] = pandas.to_datetime(payload['Date'])
+        ax.hist(payload['Value2'], bins=10)
+
+        ax.set_title('Гистограмма')
+        ax.set_xlabel('Value2')
+        ax.set_ylabel('Частота')
+
+        self.canvas.draw()
+
+    def draw_circle(self, payload):
+        print("Drawing plot")
+        ax = self.canvas.figure.add_subplot(111)
+
+        categories = payload['Category'].value_counts()
+        ax.pie(categories, labels=categories.index, autopct='%1.1f%%')
+        ax.set_title('Круговая диаграмма')
+
+        self.canvas.draw()
+
     # ОПИСЫВАЕМ всё что лочить на время загрузки
     def reaction_update_lock_n_spinner(self, is_loading):
         # 1)
         self.button_load_data.setEnabled(not is_loading)
-        # 2)
+        # 2)ё
+        self.combo_type_chooser.setEnabled(not is_loading) # - тут попытаюсь разблочить т.к. он начнёт от стейта зависеть после первого фетчинга
 
 
         # 999)
