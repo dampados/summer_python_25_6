@@ -1,31 +1,3 @@
-# class ViewModel_graphs(QObject):
-#     data_updated = pyqtSignal(object)  # Generic signal for all actions
-#     error_occurred = pyqtSignal(str)
-
-#     def dispatch(self, action, payload=None):
-#         """Centralized async action handler."""
-#         if action == Action.LOAD_CSV:
-#             self.push_task(
-#                 lambda: pd.read_csv(payload["file_path"]),
-#                 on_success=lambda data: self._handle_action(Action.LOAD_CSV, data)
-#             )
-#         elif action == Action.LOAD_DB_POSTS:
-#             self.push_task(
-#                 lambda: self.db_io_selector("fetchall")),
-#                 on_success=lambda data: self._handle_action(Action.LOAD_DB_POSTS, data)
-#             )
-
-#     def _handle_action(self, action, result):
-#         """Process action results."""
-#         if action == Action.LOAD_CSV:
-#             self.data_updated.emit({"type": "graph_data", "data": result})
-#         elif action == Action.LOAD_DB_POSTS:
-#             self.data_updated.emit({"type": "posts_data", "data": result})
-
-# # Usage:
-# view_model.dispatch(Action.LOAD_CSV, {"file_path": "data.csv"})
-
-# ПРАВИЛЬНЫЙ ПАТТЕРН НА РАСШИРЕНИЕ
 
 import sys
 import pandas
@@ -43,6 +15,7 @@ import time
 
 # GLOBALS
 FILEPATH = "sample_data.csv"
+DELAY = 1
 
 class LoadingOverlay(QWidget):
     def __init__(self, parent=None):
@@ -82,16 +55,36 @@ class Task(QRunnable):
         except Exception as e:
             self.signals.error.emit(str(e))
 
+class StatsData:
+    def __init__(self, row_count=0, col_count=0, columns_stats={}):
+        self.row_count = row_count
+        self.col_count = col_count
+        self.columns_stats = columns_stats
+
 class ViewModel_graphs(QObject):
-    sgnl_data_changed = pyqtSignal(pandas.DataFrame) # СИГНАЛ только по сигнулу
     sgnl_loading_state_changed = pyqtSignal(bool) # тип данных указываем!!!
-    sgnl_error = pyqtSignal(str)
+
+    sgnl_data_changed = pyqtSignal(pandas.DataFrame) # СИГНАЛ только по сигнулу
+    sgnl_error_data = pyqtSignal(str)
+
+    sgnl_stats_changed = pyqtSignal(StatsData)
+    sgnl_error_stats = pyqtSignal(str)
 
     def __init__(self):
         super().__init__() # init наследуемого класса!
         self._data = pandas.DataFrame()
-        self._is_loading = False                      
+        self._is_loading = False
+        self._stats_data = StatsData()
         self.threadpool = QThreadPool()
+
+    @pyqtProperty(StatsData, notify=sgnl_stats_changed)
+    def stats_data(self):
+        return self._stats_data
+    
+    @stats_data.setter
+    def stats_data(self, new_value):
+        self._stats_data = new_value
+        self.sgnl_stats_changed.emit(new_value)
 
     @pyqtProperty(bool, notify=sgnl_loading_state_changed)
     def is_loading(self):
@@ -111,30 +104,48 @@ class ViewModel_graphs(QObject):
         self._data = new_value
         self.sgnl_data_changed.emit(new_value)
 
-
+    # callable точка входа в загрузку данных
     def task_load_data_from_csv(self):
         # self._set_loading(True)                                        # ОБЯЗАТЕЛЬНО ВСЕГДА локаем ввиджет
         self.is_loading = True                                           # ОБЯЗАТЕЛЬНО ВСЕГДА локаем ввиджет (ИДИОМАТИЧНО)
-        task = Task(lambda: self.read_slowly_csv())
+        task = Task(lambda: self._read_slowly_csv())
         task.signals.finished.connect(self._on_task_load_data_success) # -> реакции
-        task.signals.error.connect(self._on_error)                     # -> реакции
+        task.signals.error.connect(self._on_any_error)                     # -> реакции
         self.threadpool.start(task)
 
-    def read_slowly_csv(self):
-        time.sleep(5)
-        return pandas.read_csv(FILEPATH)
+    def _read_slowly_csv(self):
+        time.sleep(DELAY)
+        dataframe = pandas.read_csv(FILEPATH).copy() # наконец  столкнулся с одновременным доступом из разных тредов. питон пассит референсы, не копии. пока без мьютекса
+        dataframe_for_parsing = dataframe
+        dataframe_for_rendering = dataframe
+        self._task_parse_data_from_csv(dataframe_for_parsing)
+        return dataframe_for_rendering
 
-    # def _set_loading(self, passed_loading_state):
-    #     self.is_loading = passed_loading_state
-    #     self.sgnl_loading_state_changed.emit(passed_loading_state) # эмиттим сигнал во View
+    def _task_parse_data_from_csv(self, dataframe):
+        task = Task(lambda: self._parse_data_from_csv(dataframe))
+        task.signals.finished.connect(self._on_task_parse_data_success) # -> реакции
+        task.signals.error.connect(self._on_any_error)                     # -> реакции
+        self.threadpool.start(task)
 
-    # реакции    
+    def _parse_data_from_csv(self, dataframe):
+        row_count = dataframe.shape[0]
+        col_count = dataframe.shape[1]
+        column_stats = {}
+        for col in dataframe.columns:
+            column_stats[col] = (dataframe[col].min(), dataframe[col].max())
+        new_stats_data = StatsData(row_count, col_count, column_stats)
+        return new_stats_data
+
+    # реакции (приватные, т.к. реакции меняют стейт) МЕНЯЕМ СТЕЙТ ТОЛЬКО ОТСЮДА ПО СИГНАЛУ+ПЕЙЛОАДУ
     def _on_task_load_data_success(self, payload):
         self.is_loading = False # ОБЯЗАТЕЛЬНО ВСЕГДА снимаем ввиджет
         self.data = payload
 
-    def _on_error(self, error):
-        print(f"Ошибка получения данных: {error}")
+    def _on_task_parse_data_success(self, payload):
+        self.stats_data = payload
+
+    def _on_any_error(self, error):
+        print(f"Сигнализация! : {error}")
         
 class View_graphs(QWidget):
     def __init__(self, view_model):
@@ -147,26 +158,36 @@ class View_graphs(QWidget):
 
         self.layout_root = QVBoxLayout(self)
 
-        self.buttong_load_data = QPushButton("Загрузить данные")
+        self.button_load_data = QPushButton("Загрузить данные")
+        self.label_statistics = QLabel("Статистика пуста")
 
         self.figure = Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
 
-
-        self.layout_root.addWidget(self.buttong_load_data)
+        self.layout_root.addWidget(self.button_load_data)
+        self.layout_root.addWidget(self.label_statistics)
         self.layout_root.addWidget(self.canvas)
 
         self.graph_spinner = LoadingOverlay(self) # сложность...
         self.graph_spinner.hide()
 
     def bind_signals(self):
-        self.buttong_load_data.clicked.connect(lambda: self.view_model.task_load_data_from_csv()) # НИКАКИХ ДАННЫХ ИЗ VIEW
+        self.button_load_data.clicked.connect(lambda: self.view_model.task_load_data_from_csv()) # НИКАКИХ ДАННЫХ ИЗ VIEW
         
-        # РЕАКЦИИ НА СИГНАЛЫ ИЗ АБСТРАКЦИИ
-        self.view_model.sgnl_data_changed.connect(self.reaction_update_view)
-        self.view_model.sgnl_loading_state_changed.connect(self.reaction_update_spinner)
+    # vvvvvvvvvvvvvv РЕАКЦИИ НА СИГНАЛЫ ИЗ АБСТРАКЦИИ vvvvvvvvvvvvvv
+        self.view_model.sgnl_loading_state_changed.connect(self.reaction_update_lock_n_spinner)
+        self.view_model.sgnl_data_changed.connect(self.reaction_update_canvas)
+        self.view_model.sgnl_stats_changed.connect(self.reaction_update_statistics_label)
 
-    def reaction_update_view(self, payload): # по факту реакция на сигнал, в payload разгрузит дату
+    def reaction_update_statistics_label(self, payload):
+        text = f"Строк: {payload.row_count}\n" # просто перенос каретки, проще, хороший совет
+        text += f"Колонок: {payload.col_count}\n\n"
+        for col, (min_val, max_val) in payload.columns_stats.items():
+            text += f"Столбец: {col} - МИН: {min_val}, МАКС: {max_val}\n"
+
+        self.label_statistics.setText(text)
+
+    def reaction_update_canvas(self, payload): # по факту реакция на сигнал, в payload разгрузит дату
         self.data = payload
 
         self.canvas.figure.clear() # всегда чистим переде действием
@@ -183,10 +204,18 @@ class View_graphs(QWidget):
         # Update the graph canvas
         self.canvas.draw()
 
-    def reaction_update_spinner(self, is_loading):
-        self.buttong_load_data.setEnabled(not is_loading)
+    # ^^^^^^^^^^^^^^ РЕАКЦИИ НА СИГНАЛЫ ИЗ АБСТРАКЦИИ ^^^^^^^^^^^^^^
+      
+    # ОПИСЫВАЕМ всё что лочить на время загрузки
+    def reaction_update_lock_n_spinner(self, is_loading):
+        # 1)
+        self.button_load_data.setEnabled(not is_loading)
+        # 2)
+
+
+        # 999)
         if is_loading:
-            self.graph_spinner.show()  # Assuming you've added LoadingOverlay
+            self.graph_spinner.show() 
         else:
             self.graph_spinner.hide()
 
