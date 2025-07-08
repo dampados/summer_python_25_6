@@ -1,9 +1,8 @@
-
 import sys
 import pandas
 from PyQt6.QtWidgets import (QApplication, QMainWindow,
                              QPushButton, QVBoxLayout, QWidget, 
-                             QLabel, QComboBox)
+                             QLabel, QComboBox, QHBoxLayout)
 from PyQt6.QtCore import (Qt, pyqtSignal, QObject, 
                           QRunnable, QThreadPool, pyqtProperty)
 from PyQt6.QtGui import QMovie  # переход к pyqt6
@@ -158,6 +157,9 @@ class View_graphs(QWidget):
         self.layout_root = QVBoxLayout(self)
 
         self.button_load_data = QPushButton("Загрузить данные")
+        self.button_add_data = QPushButton("Добавить данные")
+        self.button_add_data.setEnabled(False)
+
         self.label_statistics = QLabel("Статистика пуста")
 
         self.figure = Figure()
@@ -171,10 +173,17 @@ class View_graphs(QWidget):
 
         # vvv техничка vvv
         # добавляторы, порядок важен
-        self.layout_root.addWidget(self.button_load_data)
+        self.layout_upper_block = QHBoxLayout()
+        self.layout_upper_block.addWidget(self.button_load_data)
+        self.layout_upper_block.addWidget(self.button_add_data)
+        self.layout_upper_block.addWidget(self.combo_type_chooser)
+
+        self.layout_root.addLayout(self.layout_upper_block)
+        # self.layout_root.addWidget(self.button_load_data)
         self.layout_root.addWidget(self.label_statistics)
-        self.layout_root.addWidget(self.combo_type_chooser)
+        # self.layout_root.addWidget(self.combo_type_chooser)
         self.layout_root.addWidget(self.canvas)
+
 
         # прибиваем спиннер к уже собранному метавиджету СЕЛФ
         self.graph_spinner = LoadingOverlay(self) # сложность...
@@ -262,10 +271,10 @@ class View_graphs(QWidget):
     def reaction_update_lock_n_spinner(self, is_loading):
         # 1)
         self.button_load_data.setEnabled(not is_loading)
-        # 2)ё
+        # 2)
         self.combo_type_chooser.setEnabled(not is_loading) # - тут попытаюсь разблочить т.к. он начнёт от стейта зависеть после первого фетчинга
-
-
+        # 3)
+        self.button_add_data.setEnabled(not is_loading) # - тут попытаюсь разблочить т.к. он начнёт от стейта зависеть после первого фетчинга
         # 999)
         if is_loading:
             self.graph_spinner.show() 
@@ -284,6 +293,7 @@ class MainWindow(QMainWindow):
         
         # add to layout everything
 
+class ContextWindow_AddData()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
