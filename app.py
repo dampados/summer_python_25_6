@@ -1,3 +1,4 @@
+from io import BytesIO
 import sys
 import pandas
 from PyQt6.QtWidgets import (QApplication, QMainWindow,
@@ -10,6 +11,7 @@ from PyQt6.QtGui import QMovie  # переход к pyqt6
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 import time
+from context_add import ContextWindow_add
 
 # GLOBALS
 FILEPATH = "sample_data.csv"
@@ -102,6 +104,17 @@ class ViewModel_graphs(QObject):
         self._data = new_value
         self.sgnl_data_changed.emit(new_value)
 
+    #context_window хэндлер сигнала - добавление данных
+    def on_add_via_context_window(self, payload_idx, payload_string):
+        fake_csv = f"Date,Category,Value1,Value2,BooleanFlag\n{payload_string}\n"
+        new_dataframe = pandas.read_csv(BytesIO(fake_csv.encode()), header=0)
+
+        self.data = pandas.concat([self.data.iloc[:payload_idx], new_dataframe, self.data.iloc[payload_idx:]], ignore_index=True) 
+
+        print(fake_csv) 
+        print(new_dataframe)
+        print(self.data)
+
     # callable точка входа в загрузку данных
     def task_load_data_from_csv(self):
         # self._set_loading(True)                                        # ОБЯЗАТЕЛЬНО ВСЕГДА локаем ввиджет
@@ -149,6 +162,10 @@ class View_graphs(QWidget):
     def __init__(self, view_model):
         super().__init__()
         self.view_model = view_model
+        self.cntxt_window = ContextWindow_add()
+
+        self.cntxt_window.sgnl_submitted.connect(self.view_model.on_add_via_context_window) #TODO add handler for sgnl ^^^ up in the view model
+
         self.init_meta_widget_ui() # рендерим начальный ui
         self.bind_signals() # коннектим сигналы к триггерам виджетов
 
@@ -190,7 +207,8 @@ class View_graphs(QWidget):
         self.graph_spinner.hide()
 
     def bind_signals(self):
-        self.button_load_data.clicked.connect(lambda: self.view_model.task_load_data_from_csv()) # НИКАКИХ ДАННЫХ СУРСИМ ИЗ VIEW
+        self.button_load_data.clicked.connect(self.view_model.task_load_data_from_csv) # НИКАКИХ ДАННЫХ СУРСИМ ИЗ VIEW (поэтому и лямбоба не нужна)
+        self.button_add_data.clicked.connect(lambda: self.cntxt_window.show())
         self.combo_type_chooser.currentTextChanged.connect(self.redraw_canvas) # ОБНОВЛЯЕМ ИЗ self.data!!!!
         
     # vvvvvvvvvvvvvv РЕАКЦИИ НА СИГНАЛЫ ИЗ АБСТРАКЦИИ vvvvvvvvvvvvvv
