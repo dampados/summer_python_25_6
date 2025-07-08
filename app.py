@@ -293,8 +293,6 @@ class MainWindow(QMainWindow):
         
         # add to layout everything
 
-class ContextWindow_AddData()
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
