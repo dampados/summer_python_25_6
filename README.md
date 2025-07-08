@@ -1,2 +1,7 @@
-# summer_python_25_6
-Summer python practice 6th lab: async pyqt6 and pandas.
+# Летняя практика 25, лаб. 6
+async pyqt6 и pandas.
+
+- из локального файла <- ген. датафрейм
+- в датфрейм добавляем данные
+- меняем тип графика
+- mvvm
